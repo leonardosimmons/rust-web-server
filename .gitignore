@@ -1,0 +1,19 @@
+# ignore all files
+**/**
+
+# expecpt extensions...
+!**/*.rs
+!**/*.toml
+
+# ignore even valid files in...
+.git/**
+target/**
+temp/**
+
+# allow individual folders
+!src/
+!src/bin
+!tests/
+
+# allow individual files
+!.gitignore
