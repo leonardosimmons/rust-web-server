@@ -3,7 +3,7 @@ use crate::filter::Filter;
 use std::{fmt::Debug, task::Poll};
 
 use futures::Future;
-use hyper::{HeaderMap, Request};
+use hyper::{header::HOST, http::HeaderValue, HeaderMap, Request};
 use pin_project::pin_project;
 use tokio::time::Instant;
 use tower::Service;
@@ -41,10 +41,13 @@ where
         let mut headers = req.headers().clone();
         let method = req.method().clone();
         let route = req.uri().path().to_string();
-        let host = Filter::<HeaderMap>::host(&mut headers);
+        let host = Filter::<HeaderMap>::header(&mut headers, HOST).unwrap_or_else(|err| {
+            tracing::error!("[ request {} ] {} -> '{}' header", conn, err, HOST);
+            HeaderValue::from_static("unknown")
+        });
 
         tracing::debug!(
-            "processing request #{} | host: {:?} method: {}, route: {}",
+            "[ request {} ] processing... | host: {:?} method: {}, route: {}",
             conn,
             host,
             method,
@@ -53,7 +56,7 @@ where
         LoggingFuture {
             future: self.inner.call(req),
             connection_number: conn,
-            headers,
+            host,
             method,
             route,
         }
@@ -65,7 +68,7 @@ pub struct LoggingFuture<F> {
     #[pin]
     future: F,
     connection_number: usize,
-    headers: HeaderMap,
+    host: HeaderValue,
     method: hyper::Method,
     route: String,
 }
@@ -80,8 +83,7 @@ where
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
-        let mut this = self.project();
-        let host = Filter::<HeaderMap>::host(&mut this.headers);
+        let this = self.project();
 
         let start = Instant::now();
         let res = match this.future.poll(cx) {
@@ -91,10 +93,10 @@ where
         let duration = start.elapsed();
 
         tracing::debug!(
-            "request #{} completed in {:?}. | host: {:?}, method: {}, route: {}",
+            "[ request {} ] completed in {:?}. | host: {:?}, method: {}, route: {}",
             this.connection_number,
             duration,
-            host,
+            this.host,
             this.method,
             this.route
         );
