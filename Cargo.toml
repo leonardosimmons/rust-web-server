@@ -2,7 +2,7 @@
 name = "rust-web-server"
 version = "0.1.0"
 edition = "2021"
-descriptionn = "Http web server built in rust"
+description = "Http web server built in rust"
 
 [dependencies]
 # async
