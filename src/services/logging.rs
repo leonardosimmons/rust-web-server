@@ -1,7 +1,9 @@
+use crate::filter::Filter;
+
 use std::{fmt::Debug, task::Poll};
 
 use futures::Future;
-use hyper::{header::Entry, http::HeaderValue, HeaderMap, Request};
+use hyper::{HeaderMap, Request};
 use pin_project::pin_project;
 use tokio::time::Instant;
 use tower::Service;
@@ -21,21 +23,6 @@ impl<S> Logging<S> {
     }
 }
 
-impl Logging<HeaderMap> {
-    /// Returns the specified header entry from the request headers
-    fn get_header(headers: &mut HeaderMap, entry: &'static str) -> HeaderValue {
-        return match headers.entry(entry) {
-            Entry::Occupied(entry) => entry.get().to_owned(),
-            Entry::Vacant(_) => HeaderValue::from(0),
-        };
-    }
-
-    /// Returns the current host/origin of the request
-    fn host(headers: &mut HeaderMap) -> HeaderValue {
-        Logging::get_header(headers, "host")
-    }
-}
-
 impl<S, B> Service<Request<B>> for Logging<S>
 where
     S: Service<Request<B>> + Debug,
@@ -52,9 +39,9 @@ where
     fn call(&mut self, req: Request<B>) -> Self::Future {
         let conn = self.connection_number.clone();
         let mut headers = req.headers().clone();
-        let host = Logging::<HeaderMap>::host(&mut headers);
         let method = req.method().clone();
         let route = req.uri().path().to_string();
+        let host = Filter::<HeaderMap>::host(&mut headers);
 
         tracing::debug!(
             "processing request #{} | origin: {:?} method: {}, route: {}",
@@ -94,13 +81,15 @@ where
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
         let mut this = self.project();
+        let host = Filter::<HeaderMap>::host(&mut this.headers);
+
         let start = Instant::now();
         let res = match this.future.poll(cx) {
             Poll::Ready(res) => res,
             Poll::Pending => return Poll::Pending,
         };
         let duration = start.elapsed();
-        let host = Logging::<HeaderMap>::host(&mut this.headers);
+
         tracing::debug!(
             "request #{} completed in {:?}. | origin: {:?}, method: {}, route: {}",
             this.connection_number,
