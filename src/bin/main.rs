@@ -10,13 +10,19 @@ use std::{
 
 use hyper::server::conn::Http;
 use tokio::net::TcpListener;
+use tracing_subscriber::EnvFilter;
 
-const TRACING_FILTER: &str = "rust_web_server=trace";
+const PROGRAM_TRACING_FILTER: &str = "main=trace";
+const SYSTEM_TRACING_FILTER: &str = "rust_web_server=trace";
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let env_filter = EnvFilter::from_default_env()
+        .add_directive(PROGRAM_TRACING_FILTER.parse().unwrap_or_default())
+        .add_directive(SYSTEM_TRACING_FILTER.parse().unwrap_or_default());
+
     tracing_subscriber::fmt()
-        .with_env_filter(TRACING_FILTER)
+        .with_env_filter(env_filter)
         .compact()
         .init();
 
