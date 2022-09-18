@@ -13,6 +13,7 @@ temp/**
 # allow individual folders
 !src/
 !src/bin
+!src/services
 !tests/
 
 # allow individual files
