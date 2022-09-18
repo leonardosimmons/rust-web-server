@@ -44,7 +44,7 @@ where
         let host = Filter::<HeaderMap>::host(&mut headers);
 
         tracing::debug!(
-            "processing request #{} | origin: {:?} method: {}, route: {}",
+            "processing request #{} | host: {:?} method: {}, route: {}",
             conn,
             host,
             method,
@@ -91,7 +91,7 @@ where
         let duration = start.elapsed();
 
         tracing::debug!(
-            "request #{} completed in {:?}. | origin: {:?}, method: {}, route: {}",
+            "request #{} completed in {:?}. | host: {:?}, method: {}, route: {}",
             this.connection_number,
             duration,
             host,
