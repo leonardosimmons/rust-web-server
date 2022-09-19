@@ -1,9 +1,9 @@
 use crate::filter::Filter;
 
-use std::{fmt::Debug, task::Poll};
+use std::task::Poll;
 
 use futures::Future;
-use hyper::{header::HOST, http::HeaderValue, HeaderMap, Request};
+use hyper::{header::HOST, http::HeaderValue, HeaderMap, Request, Response};
 use pin_project::pin_project;
 use tokio::time::Instant;
 use tower::Service;
@@ -25,15 +25,16 @@ impl<S> Logging<S> {
 
 impl<S, B> Service<Request<B>> for Logging<S>
 where
-    S: Service<Request<B>> + Debug,
-    B: Debug,
+    S: Service<Request<B>, Response = Response<B>> + Clone + Send + 'static,
+    B: 'static + Send,
+    S::Future: 'static + Send,
 {
     type Response = S::Response;
     type Error = S::Error;
     type Future = LoggingFuture<S::Future>;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx).map_err(Into::into)
+        self.inner.poll_ready(cx)
     }
 
     fn call(&mut self, req: Request<B>) -> Self::Future {
@@ -42,23 +43,26 @@ where
         let method = req.method().clone();
         let route = req.uri().path().to_string();
         let host = Filter::<HeaderMap>::header(&mut headers, HOST).unwrap_or_else(|err| {
-            tracing::error!("[ request {} ] {} -> '{}' header", conn, err, HOST);
+            tracing::error!("[ request {} ] {} -> header={}", conn, err, HOST);
             HeaderValue::from_static("unknown")
         });
 
         tracing::debug!(
-            "[ request {} ] processing... | host: {:?} method: {}, route: {}",
+            "[ request {} ] processing... | host={:?} method={}, route={}",
             conn,
             host,
             method,
             route
         );
+
+        let start = Instant::now();
         LoggingFuture {
             future: self.inner.call(req),
             connection_number: conn,
             host,
             method,
             route,
+            start,
         }
     }
 }
@@ -71,13 +75,14 @@ pub struct LoggingFuture<F> {
     host: HeaderValue,
     method: hyper::Method,
     route: String,
+    start: Instant,
 }
 
-impl<F> Future for LoggingFuture<F>
+impl<F, B, E> Future for LoggingFuture<F>
 where
-    F: Future,
+    F: Future<Output = Result<Response<B>, E>>,
 {
-    type Output = F::Output;
+    type Output = Result<Response<B>, E>;
 
     fn poll(
         self: std::pin::Pin<&mut Self>,
@@ -85,16 +90,22 @@ where
     ) -> std::task::Poll<Self::Output> {
         let this = self.project();
 
-        let start = Instant::now();
         let res = match this.future.poll(cx) {
             Poll::Ready(res) => res,
             Poll::Pending => return Poll::Pending,
         };
-        let duration = start.elapsed();
+        let duration = this.start.elapsed();
+
+        let status = if let Ok(res) = &res {
+            res.status().as_u16()
+        } else {
+            500
+        };
 
         tracing::debug!(
-            "[ request {} ] completed in {:?}. | host: {:?}, method: {}, route: {}",
+            "[ request {} ] completed | status={} time={:?} host={:?}, method={}, route={}",
             this.connection_number,
+            status,
             duration,
             this.host,
             this.method,
